@@ -15,4 +15,13 @@ public interface TicketRepository extends JpaRepository<TicketEntity, UUID> {
     @Query("select t.seatNumber from TicketEntity t where t.tripId = :tripId and t.status in :statuses")
     List<Integer> findSeatNumbersByTripIdAndStatusIn(@Param("tripId") UUID tripId,
                                                      @Param("statuses") Collection<TicketStatus> statuses);
+
+    @Query("""
+            select new com.urbantransport.ticketing.repository.TripSeatCount(t.tripId, count(t))
+            from TicketEntity t
+            where t.tripId in :tripIds and t.status in :statuses
+            group by t.tripId
+            """)
+    List<TripSeatCount> countSeatsByTripIds(@Param("tripIds") Collection<UUID> tripIds,
+                                            @Param("statuses") Collection<TicketStatus> statuses);
 }

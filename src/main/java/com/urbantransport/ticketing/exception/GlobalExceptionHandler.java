@@ -52,4 +52,13 @@ public class GlobalExceptionHandler {
                                                             HttpServletRequest request) {
         return build(HttpStatus.BAD_REQUEST, "Parámetro inválido: " + exception.getName(), request);
     }
+
+
+    @ExceptionHandler(SeatsUnavailableException.class)
+    public ResponseEntity<SeatConflictResponse> handleSeatsUnavailable(SeatsUnavailableException exception,
+                                                                       HttpServletRequest request) {
+        return ResponseEntity.status(exception.getStatus())
+                .body(new SeatConflictResponse(Instant.now(), exception.getStatus().value(),
+                        exception.getMessage(), request.getRequestURI(), exception.getSeats()));
+    }
 }

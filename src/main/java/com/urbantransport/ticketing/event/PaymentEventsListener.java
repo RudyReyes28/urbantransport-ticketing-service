@@ -29,7 +29,11 @@ public class PaymentEventsListener {
                 PaymentResultEvent event = jsonMapper.readValue(message, PaymentResultEvent.class);
                 orderPaymentService.handlePaymentFailed(event.eventId(), event.payload());
             }
-            default -> log.debug("Evento {} ignorado", type); // RefundCompleted llega en el paso 8
+            case EventTypes.REFUND_COMPLETED -> {
+                RefundCompletedEvent event = jsonMapper.readValue(message, RefundCompletedEvent.class);
+                orderPaymentService.handleRefundCompleted(event.eventId(), event.payload());
+            }
+            default -> log.debug("Evento {} ignorado", type);
         }
     }
 }

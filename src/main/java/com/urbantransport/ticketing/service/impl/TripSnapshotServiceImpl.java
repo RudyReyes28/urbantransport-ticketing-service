@@ -6,6 +6,7 @@ import com.urbantransport.ticketing.domain.TripStatus;
 import com.urbantransport.ticketing.event.TripUpsertEvent;
 import com.urbantransport.ticketing.repository.ProcessedEventRepository;
 import com.urbantransport.ticketing.repository.TripSnapshotRepository;
+import com.urbantransport.ticketing.service.TripCascadeService;
 import com.urbantransport.ticketing.service.TripSnapshotService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +31,7 @@ public class TripSnapshotServiceImpl implements TripSnapshotService {
 
     private final TripSnapshotRepository tripSnapshotRepository;
     private final ProcessedEventRepository processedEventRepository;
+    private final TripCascadeService tripCascadeService;
 
     @Override
     @Transactional
@@ -93,7 +95,12 @@ public class TripSnapshotServiceImpl implements TripSnapshotService {
             trip.setStatus(newStatus);
             trip.setLastEventAt(occurredAt);
             tripSnapshotRepository.save(trip);
-            // Paso 8: aquí se expiran las órdenes pendientes (TripStarted) o se cancelan los boletos (TripDeleted)
+            switch (newStatus) {
+                // Si el viaje sale (o se completa sin haber pasado por TripStarted), nada pendiente puede cobrarse ya
+                case IN_TRANSIT, COMPLETED -> tripCascadeService.expirePendingOrders(tripId);
+                case DELETED -> tripCascadeService.cancelTripOrders(tripId);
+                default -> { }
+            }
         }
         markProcessed(eventId);
     }

@@ -2,6 +2,7 @@ package com.urbantransport.ticketing.service;
 
 import com.urbantransport.ticketing.dto.PageResponse;
 import com.urbantransport.ticketing.dto.SeatMapResponse;
+import com.urbantransport.ticketing.dto.SoldSummaryResponse;
 import com.urbantransport.ticketing.dto.TripResponse;
 
 import java.time.LocalDate;
@@ -13,4 +14,6 @@ public interface TripQueryService {
                                                int page, int size);
 
     SeatMapResponse getSeatMap(UUID tripId);
+
+    SoldSummaryResponse soldSummary(UUID tripId);
 }

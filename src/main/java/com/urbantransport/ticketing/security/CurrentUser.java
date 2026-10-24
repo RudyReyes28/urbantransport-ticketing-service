@@ -5,6 +5,7 @@ import com.urbantransport.ticketing.util.NitUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 
+import java.util.List;
 import java.util.UUID;
 
 public final class CurrentUser {
@@ -48,5 +49,11 @@ public final class CurrentUser {
     public static String email(Jwt jwt) {
         String value = jwt.getClaimAsString("email");
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    /** El token trae un solo rol, en el arreglo "roles". */
+    public static boolean isSystemAdmin(Jwt jwt) {
+        List<String> roles = jwt.getClaimAsStringList("roles");
+        return roles != null && roles.contains("SYSTEM_ADMIN");
     }
 }

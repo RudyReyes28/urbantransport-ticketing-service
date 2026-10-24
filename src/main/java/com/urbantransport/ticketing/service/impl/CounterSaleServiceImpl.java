@@ -2,26 +2,14 @@ package com.urbantransport.ticketing.service.impl;
 
 import com.urbantransport.ticketing.client.CustomerClient;
 import com.urbantransport.ticketing.client.CustomerSummary;
-import com.urbantransport.ticketing.config.TicketingProperties;
-import com.urbantransport.ticketing.domain.OrderStatus;
-import com.urbantransport.ticketing.domain.PurchaseOrderEntity;
-import com.urbantransport.ticketing.domain.SalesChannel;
-import com.urbantransport.ticketing.domain.SeatLayout;
-import com.urbantransport.ticketing.domain.TicketEntity;
-import com.urbantransport.ticketing.domain.TicketStatus;
-import com.urbantransport.ticketing.domain.TripSnapshotEntity;
-import com.urbantransport.ticketing.domain.TripStatus;
-import com.urbantransport.ticketing.dto.CounterSaleRequest;
-import com.urbantransport.ticketing.dto.OrderResponse;
+import com.urbantransport.ticketing.domain.*;
+import com.urbantransport.ticketing.dto.*;
 import com.urbantransport.ticketing.event.EventTypes;
 import com.urbantransport.ticketing.event.TicketPurchasedPayload;
 import com.urbantransport.ticketing.exception.ApiException;
 import com.urbantransport.ticketing.exception.SeatsUnavailableException;
 import com.urbantransport.ticketing.repository.PurchaseOrderRepository;
-import com.urbantransport.ticketing.repository.TicketRepository;
-import com.urbantransport.ticketing.repository.TripSnapshotRepository;
-import com.urbantransport.ticketing.service.CounterSaleService;
-import com.urbantransport.ticketing.service.OutboxService;
+import com.urbantransport.ticketing.service.*;
 import com.urbantransport.ticketing.util.GenericCustomer;
 import com.urbantransport.ticketing.util.NitUtils;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +23,6 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -47,13 +34,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CounterSaleServiceImpl implements CounterSaleService {
 
-    private final TripSnapshotRepository tripSnapshotRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
-    private final TicketRepository ticketRepository;
     private final CustomerClient customerClient;
     private final OutboxService outboxService;
+    private final OrderRules rules;
     private final TransactionTemplate transactionTemplate;
-    private final TicketingProperties properties;
     private final Clock clock;
 
     private record CustomerRef(UUID id, String nit) {
@@ -61,11 +46,11 @@ public class CounterSaleServiceImpl implements CounterSaleService {
 
     @Override
     public OrderResponse sell(UUID userId, UUID branchId, String accessToken, CounterSaleRequest request) {
-        List<Integer> seats = normalizeSeats(request.seats());
-        LocalDate paymentDate = resolvePaymentDate(request.paymentDate());
+        List<Integer> seats = rules.normalizeSeats(request.seats());
+        LocalDate paymentDate = rules.resolvePaymentDate(request.paymentDate());
 
-        TripSnapshotEntity trip = loadSellableTrip(request.tripId(), branchId);
-        validateSeatsInRange(trip, seats);
+        TripSnapshotEntity trip = loadTripOfBranch(request.tripId(), branchId);
+        rules.validateSeatsInRange(trip, seats);
         CustomerRef customer = resolveCustomer(request.customerNit(), accessToken);
 
         try {
@@ -73,7 +58,7 @@ public class CounterSaleServiceImpl implements CounterSaleService {
                     persist(userId, branchId, request.tripId(), seats, paymentDate, customer));
         } catch (DataIntegrityViolationException exception) {
             // Otra venta tomó un asiento entre la verificación y el guardado (uq_active_seat)
-            List<Integer> taken = takenAmong(request.tripId(), seats);
+            List<Integer> taken = rules.takenAmong(request.tripId(), seats);
             if (taken.isEmpty()) {
                 throw exception;
             }
@@ -84,16 +69,11 @@ public class CounterSaleServiceImpl implements CounterSaleService {
     private OrderResponse persist(UUID userId, UUID branchId, UUID tripId, List<Integer> seats,
                                   LocalDate paymentDate, CustomerRef customer) {
         // Se vuelve a leer dentro de la transacción: el viaje pudo cambiar mientras se consultaba a customer
-        TripSnapshotEntity trip = loadSellableTrip(tripId, branchId);
-
-        List<Integer> taken = takenAmong(tripId, seats);
-        if (!taken.isEmpty()) {
-            throw new SeatsUnavailableException(taken);
-        }
+        TripSnapshotEntity trip = loadTripOfBranch(tripId, branchId);
+        rules.assertSeatsFree(tripId, seats);
 
         SeatLayout layout = trip.seatLayout();
         BigDecimal price = trip.getTicketPrice().setScale(2, RoundingMode.HALF_UP);
-        LocalDateTime now = LocalDateTime.now(clock);
 
         PurchaseOrderEntity order = PurchaseOrderEntity.builder()
                 .tripId(tripId)
@@ -105,7 +85,7 @@ public class CounterSaleServiceImpl implements CounterSaleService {
                 .total(price.multiply(BigDecimal.valueOf(seats.size())))
                 .status(OrderStatus.CONFIRMED)
                 .paymentDate(paymentDate)
-                .confirmedAt(now)
+                .confirmedAt(LocalDateTime.now(clock))
                 .build();
         for (int seat : seats) {
             order.addTicket(TicketEntity.builder()
@@ -128,50 +108,14 @@ public class CounterSaleServiceImpl implements CounterSaleService {
         return OrderResponse.fromEntity(order, trip);
     }
 
-    // ---------- validaciones ----------
-
-    private List<Integer> normalizeSeats(List<Integer> requested) {
-        if (new HashSet<>(requested).size() != requested.size()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Hay asientos repetidos en la petición");
-        }
-        if (requested.size() > properties.maxSeatsPerOrder()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "Se pueden vender hasta " + properties.maxSeatsPerOrder() + " asientos por orden");
-        }
-        return requested.stream().sorted().toList();
-    }
-
-    private LocalDate resolvePaymentDate(LocalDate requested) {
-        LocalDate today = LocalDate.now(clock);
-        if (requested == null) {
-            return today;
-        }
-        if (requested.isAfter(today)) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "La fecha de pago no puede ser futura");
-        }
-        return requested;
-    }
-
-    private TripSnapshotEntity loadSellableTrip(UUID tripId, UUID sellerBranchId) {
-        TripSnapshotEntity trip = tripSnapshotRepository.findById(tripId)
-                .filter(found -> found.getStatus() != TripStatus.DELETED)
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "El viaje no existe"));
+    /** Existe (404), sale de la sucursal del vendedor (403) y es vendible (409), en ese orden. */
+    private TripSnapshotEntity loadTripOfBranch(UUID tripId, UUID sellerBranchId) {
+        TripSnapshotEntity trip = rules.findTrip(tripId);
         if (!trip.getOriginBranchId().equals(sellerBranchId)) {
             throw new ApiException(HttpStatus.FORBIDDEN, "Solo puedes vender viajes que salen de tu sucursal");
         }
-        if (!trip.isSellable(LocalDateTime.now(clock))) {
-            throw new ApiException(HttpStatus.CONFLICT, "El viaje ya no está disponible para la venta");
-        }
+        rules.requireSellable(trip);
         return trip;
-    }
-
-    private void validateSeatsInRange(TripSnapshotEntity trip, List<Integer> seats) {
-        SeatLayout layout = trip.seatLayout();
-        List<Integer> invalid = seats.stream().filter(seat -> !layout.contains(seat)).toList();
-        if (!invalid.isEmpty()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "Asientos fuera de rango (1 a " + layout.capacity() + "): " + invalid);
-        }
     }
 
     private CustomerRef resolveCustomer(String rawNit, String accessToken) {
@@ -186,12 +130,5 @@ public class CounterSaleServiceImpl implements CounterSaleService {
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
                         "El cliente con NIT " + nit + " no está registrado; regístralo primero"));
         return new CustomerRef(customer.id(), customer.nit());
-    }
-
-    private List<Integer> takenAmong(UUID tripId, List<Integer> seats) {
-        return ticketRepository.findSeatNumbersByTripIdAndStatusIn(tripId, TicketStatus.ACTIVE).stream()
-                .filter(seats::contains)
-                .sorted()
-                .toList();
     }
 }

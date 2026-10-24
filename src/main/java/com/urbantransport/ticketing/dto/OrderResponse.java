@@ -20,6 +20,7 @@ public class OrderResponse {
     UUID tripId;
     SalesChannel channel;
     OrderStatus status;
+    String failureReason;
     String originName;
     String destinationName;
     String busPlate;
@@ -37,8 +38,8 @@ public class OrderResponse {
                 .map(TicketResponse::fromEntity)
                 .toList();
         return new OrderResponse(order.getId(), order.getTripId(), order.getChannel(), order.getStatus(),
-                trip.getOriginName(), trip.getDestinationName(), trip.getBusPlate(), trip.getDepartureAt(),
-                order.getCustomerNit(), order.getTotal(), order.getPaymentDate(), order.getCreatedAt(),
-                order.getExpiresAt(), tickets);
+                order.getFailureReason(), trip.getOriginName(), trip.getDestinationName(), trip.getBusPlate(),
+                trip.getDepartureAt(), order.getCustomerNit(), order.getTotal(), order.getPaymentDate(),
+                order.getCreatedAt(), order.getExpiresAt(), tickets);
     }
 }

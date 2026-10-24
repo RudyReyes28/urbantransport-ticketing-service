@@ -5,6 +5,7 @@ import com.urbantransport.ticketing.domain.TripSnapshotEntity;
 import com.urbantransport.ticketing.domain.TripStatus;
 import com.urbantransport.ticketing.dto.PageResponse;
 import com.urbantransport.ticketing.dto.SeatMapResponse;
+import com.urbantransport.ticketing.dto.SoldSummaryResponse;
 import com.urbantransport.ticketing.dto.TripResponse;
 import com.urbantransport.ticketing.exception.ApiException;
 import com.urbantransport.ticketing.repository.TicketRepository;
@@ -88,5 +89,11 @@ public class TripQueryServiceImpl implements TripQueryService {
         Set<Integer> occupied = new HashSet<>(
                 ticketRepository.findSeatNumbersByTripIdAndStatusIn(tripId, TicketStatus.ACTIVE));
         return SeatMapResponse.fromEntity(trip, occupied, trip.isSellable(LocalDateTime.now(clock)));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SoldSummaryResponse soldSummary(UUID tripId) {
+        return SoldSummaryResponse.of(tripId, ticketRepository.summarize(tripId, TicketStatus.ACTIVE));
     }
 }

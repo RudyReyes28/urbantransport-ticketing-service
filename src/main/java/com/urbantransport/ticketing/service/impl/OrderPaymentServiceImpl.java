@@ -7,12 +7,10 @@ import com.urbantransport.ticketing.domain.PurchaseOrderEntity;
 import com.urbantransport.ticketing.domain.TicketEntity;
 import com.urbantransport.ticketing.domain.TicketStatus;
 import com.urbantransport.ticketing.domain.TripSnapshotEntity;
-import com.urbantransport.ticketing.event.EventTypes;
-import com.urbantransport.ticketing.event.PaymentResultEvent;
-import com.urbantransport.ticketing.event.RefundRequestedPayload;
-import com.urbantransport.ticketing.event.TicketPurchasedPayload;
+import com.urbantransport.ticketing.event.*;
 import com.urbantransport.ticketing.repository.ProcessedEventRepository;
 import com.urbantransport.ticketing.repository.PurchaseOrderRepository;
+import com.urbantransport.ticketing.repository.TicketRepository;
 import com.urbantransport.ticketing.repository.TripSnapshotRepository;
 import com.urbantransport.ticketing.service.OrderPaymentService;
 import com.urbantransport.ticketing.service.OutboxService;
@@ -23,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -42,6 +41,7 @@ public class OrderPaymentServiceImpl implements OrderPaymentService {
     private final ProcessedEventRepository processedEventRepository;
     private final OutboxService outboxService;
     private final Clock clock;
+    private final TicketRepository ticketRepository;
 
     @Override
     @Transactional
@@ -85,6 +85,32 @@ public class OrderPaymentServiceImpl implements OrderPaymentService {
             order.cancelPendingTickets(CancelReason.PAYMENT_FAILED, LocalDateTime.now(clock));
         } else {
             log.debug("Orden {} en estado {}, el fallo de pago se ignora", order.getId(), order.getStatus());
+        }
+        markProcessed(eventId);
+    }
+
+    @Override
+    @Transactional
+    public void handleRefundCompleted(UUID eventId, RefundCompletedEvent.RefundCompletedPayload payload) {
+        if (processedEventRepository.existsById(eventId)) {
+            log.debug("Evento {} ya procesado, se ignora", eventId);
+            return;
+        }
+        if (payload == null || payload.ticketId() == null) {
+            throw new IllegalArgumentException("RefundCompleted sin ticketId");
+        }
+
+        Optional<TicketEntity> found = ticketRepository.findById(payload.ticketId());
+        if (found.isEmpty()) {
+            // Reembolso de otro servicio (p. ej. alquileres): no es un boleto de ticketing
+            log.debug("Reembolso {} de {} ignorado: no es un boleto", eventId, payload.ticketId());
+            return;
+        }
+        TicketEntity ticket = found.get();
+        if (ticket.getStatus() == TicketStatus.CANCELLED) {
+            ticket.setStatus(TicketStatus.REFUNDED);
+        } else {
+            log.debug("Boleto {} en estado {}, el reembolso se ignora", ticket.getId(), ticket.getStatus());
         }
         markProcessed(eventId);
     }

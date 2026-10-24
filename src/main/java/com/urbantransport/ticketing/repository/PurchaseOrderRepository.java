@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,4 +34,10 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrderEnti
     List<UUID> findExpiredPendingIds(@Param("status") OrderStatus status,
                                      @Param("now") LocalDateTime now,
                                      Pageable pageable);
+
+    /** Bloquea todas las órdenes del viaje en ese estado, en orden de id para que el bloqueo sea siempre igual. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from PurchaseOrderEntity o where o.tripId = :tripId and o.status in :statuses order by o.id")
+    List<PurchaseOrderEntity> findByTripIdAndStatusInForUpdate(@Param("tripId") UUID tripId,
+                                                               @Param("statuses") Collection<OrderStatus> statuses);
 }

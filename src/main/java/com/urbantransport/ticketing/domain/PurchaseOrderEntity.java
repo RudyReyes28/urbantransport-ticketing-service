@@ -85,4 +85,42 @@ public class PurchaseOrderEntity {
         ticket.setOrder(this);
         tickets.add(ticket);
     }
+
+    /** Confirma los boletos que seguían pendientes. */
+    public void confirmPendingTickets() {
+        tickets.stream()
+                .filter(ticket -> ticket.getStatus() == TicketStatus.PENDING)
+                .forEach(ticket -> ticket.setStatus(TicketStatus.CONFIRMED));
+    }
+
+    /** Cancela los boletos pendientes y libera sus asientos (salen del índice uq_active_seat). */
+    public void cancelPendingTickets(String reason, LocalDateTime when) {
+        tickets.stream()
+                .filter(ticket -> ticket.getStatus() == TicketStatus.PENDING)
+                .forEach(ticket -> {
+                    ticket.setStatus(TicketStatus.CANCELLED);
+                    ticket.setCancelReason(reason);
+                    ticket.setCancelledAt(when);
+                });
+    }
+
+    /**
+     * Cancela los boletos activos (pendientes y confirmados). Devuelve solo los que estaban CONFIRMED, es decir,
+     * los que ya se cobraron y requieren aviso y reembolso.
+     */
+    public List<TicketEntity> cancelActiveTickets(String reason, LocalDateTime when) {
+        List<TicketEntity> charged = new ArrayList<>();
+        for (TicketEntity ticket : tickets) {
+            if (!TicketStatus.ACTIVE.contains(ticket.getStatus())) {
+                continue;
+            }
+            if (ticket.getStatus() == TicketStatus.CONFIRMED) {
+                charged.add(ticket);
+            }
+            ticket.setStatus(TicketStatus.CANCELLED);
+            ticket.setCancelReason(reason);
+            ticket.setCancelledAt(when);
+        }
+        return charged;
+    }
 }

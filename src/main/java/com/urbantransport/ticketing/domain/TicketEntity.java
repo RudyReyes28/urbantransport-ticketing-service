@@ -25,6 +25,10 @@ public class TicketEntity {
     @JoinColumn(name = "order_id", nullable = false)
     private PurchaseOrderEntity order;
 
+    /** Solo lectura: el id de la orden, sin cargar la orden. */
+    @Column(name = "order_id", insertable = false, updatable = false)
+    private UUID orderId;
+
     @Column(name = "trip_id", nullable = false)
     private UUID tripId;
 

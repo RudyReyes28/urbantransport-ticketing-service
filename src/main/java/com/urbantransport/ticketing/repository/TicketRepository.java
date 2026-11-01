@@ -2,6 +2,8 @@ package com.urbantransport.ticketing.repository;
 
 import com.urbantransport.ticketing.domain.TicketEntity;
 import com.urbantransport.ticketing.domain.TicketStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -15,4 +17,26 @@ public interface TicketRepository extends JpaRepository<TicketEntity, UUID> {
     @Query("select t.seatNumber from TicketEntity t where t.tripId = :tripId and t.status in :statuses")
     List<Integer> findSeatNumbersByTripIdAndStatusIn(@Param("tripId") UUID tripId,
                                                      @Param("statuses") Collection<TicketStatus> statuses);
+
+    @Query("""
+            select new com.urbantransport.ticketing.repository.TripSeatCount(t.tripId, count(t))
+            from TicketEntity t
+            where t.tripId in :tripIds and t.status in :statuses
+            group by t.tripId
+            """)
+    List<TripSeatCount> countSeatsByTripIds(@Param("tripIds") Collection<UUID> tripIds,
+                                            @Param("statuses") Collection<TicketStatus> statuses);
+
+
+    Page<TicketEntity> findByCustomerIdAndStatusIn(UUID customerId, Collection<TicketStatus> statuses,
+                                                   Pageable pageable);
+
+    List<TicketEntity> findByTripIdAndStatusInOrderBySeatNumber(UUID tripId, Collection<TicketStatus> statuses);
+
+    @Query("""
+        select new com.urbantransport.ticketing.repository.TripSoldSummary(count(t), max(t.seatNumber))
+        from TicketEntity t
+        where t.tripId = :tripId and t.status in :statuses
+        """)
+    TripSoldSummary summarize(@Param("tripId") UUID tripId, @Param("statuses") Collection<TicketStatus> statuses);
 }
